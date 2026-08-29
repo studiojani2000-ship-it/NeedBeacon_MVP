@@ -1,6 +1,5 @@
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
 import re
 import os
 import glob
@@ -784,6 +783,7 @@ def main():
         print()
         time.sleep(0.35)
 
+    import pandas as pd  # local import: only needed when exporting CLI reports
     df = pd.DataFrame(results)
 
     df["_sort"] = pd.to_numeric(df["opportunity_score"], errors="coerce").fillna(-1)

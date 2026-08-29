@@ -7,9 +7,9 @@ import re
 app = Flask(__name__)
 LAST_RESULT = None
 
-DISCOVERY_POOL = 50
+DISCOVERY_POOL = 30
 DEFAULT_SHOW = 10
-MAX_WORKERS = 6
+MAX_WORKERS = 3
 PUBLIC_BASE_URL = "https://needbeacon.onrender.com"
 
 
