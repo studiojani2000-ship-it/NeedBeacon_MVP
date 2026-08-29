@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NeedBeacon</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="wrap">
+    <header class="hero">
+      <div class="badge">MVP</div>
+      <h1>Need<span>Beacon</span></h1>
+      <p class="lead">Find businesses that need what you sell.</p>
+    </header>
+
+    <section class="panel">
+      <form method="post">
+        <div class="grid focused">
+          <label>
+            <span>Service</span>
+            <input value="Website design" disabled>
+          </label>
+
+          <label>
+            <span>Target business</span>
+            <input value="Restaurants" disabled>
+          </label>
+
+          <label>
+            <span>City</span>
+            <input name="city" value="{{ city }}" placeholder="e.g. Milano" required>
+          </label>
+
+          <label>
+            <span>Best opportunities to show</span>
+            <select name="show_count">
+              {% for n in [5, 10, 20] %}
+              <option value="{{ n }}" {% if show_count == n %}selected{% endif %}>{{ n }}</option>
+              {% endfor %}
+            </select>
+          </label></div>
+
+        <button type="submit">Find Opportunities</button>
+        <p class="hint">NeedBeacon scans a wider pool, ranks it, and shows the best website-design leads first.</p>
+      </form>
+    </section>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+
+    {% if results is not none %}
+      <section class="results-head">
+        <div>
+          <h2>Opportunity results</h2>
+          <p>{{ analyzed_count }} businesses analyzed from a pool of {{ pool_count }}{% if elapsed is not none %} in {{ elapsed }}s{% endif %}.</p>
+        </div>
+        <div class="service-pill">Website design → Restaurants</div>
+      </section>
+
+      <section class="cards">
+        {% for r in results %}
+          {% set score = r.opportunity_score %}
+          <article class="card {% if score is not none and score >= 70 %}strong{% elif score is not none and score >= 25 %}medium{% else %}low{% endif %}">
+            <div class="card-top">
+              <div>
+                <h3>{{ r.business_name }}</h3>
+                <a href="{{ r.website }}" target="_blank" rel="noopener">{{ r.website }}</a>
+              </div>
+
+              <div class="score">
+                {% if score is none %}
+                  <b>N/A</b><small>{{ r.status }}</small>
+                {% else %}
+                  <b>{{ score }}</b><small>/100</small>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="meta">
+              <span>{{ r.confidence }} confidence</span>
+              <span>{{ r.pages_checked }} pages checked</span>
+              <span>{{ r.status }}</span>
+            </div>
+
+            {% if r.primary_problem %}
+              <div class="block">
+                <strong>Problem</strong>
+                <p>{{ r.primary_problem }}</p>
+              </div>
+            {% endif %}
+
+            {% if r.recommended_action %}
+              <div class="block">
+                <strong>Recommended action</strong>
+                <p>{{ r.recommended_action }}</p>
+              </div>
+            {% endif %}
+
+            {% if r.signals %}
+              <div class="block">
+                <strong>Signals</strong>
+                <ul>
+                  {% for s in r.signals %}
+                    <li>{{ s }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+
+            {% if r.evidence %}
+              
+          {% if r.outreach %}
+          <div class="action-panel">
+            <div class="action-title">Ready-to-use lead</div>
+            {% if r.outreach.email %}
+            <div><strong>Email:</strong> {{ r.outreach.email }}</div>
+            {% endif %}
+            {% if r.outreach.phone %}
+            <div><strong>Phone:</strong> {{ r.outreach.phone }}</div>
+            {% endif %}
+            <div class="outreach-subject"><strong>Subject:</strong> {{ r.outreach.subject }}</div>
+            <div class="outreach-label">Personalized outreach</div>
+            <pre class="outreach-message">{{ r.outreach.message }}</pre>
+          </div>
+          {% endif %}
+
+<details>
+                <summary>Evidence</summary>
+                <ul class="evidence">
+                  {% for e in r.evidence[:6] %}
+                    <li>{{ e }}</li>
+                  {% endfor %}
+                </ul>
+              </details>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </section>
+    {% endif %}
+
+    <footer>
+      NeedBeacon local MVP — validation build
+    </footer>
+  </main>
+</body>
+</html>
+

@@ -1,0 +1,113 @@
+* { box-sizing: border-box; }
+:root {
+  --bg: #0a0d12;
+  --panel: #111722;
+  --card: #121923;
+  --line: #263143;
+  --text: #f4f7fb;
+  --muted: #9eabc0;
+  --accent: #7c9cff;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #fb7185;
+}
+body {
+  margin: 0;
+  background: radial-gradient(circle at 50% -20%, #1b2740 0, var(--bg) 42%);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+}
+.wrap { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
+.hero { padding: 72px 0 34px; text-align: center; }
+.badge {
+  display: inline-block; padding: 6px 10px; border: 1px solid #32415d;
+  border-radius: 99px; color: #b9c8e5; font-size: 12px; letter-spacing: .12em;
+}
+h1 { margin: 14px 0 8px; font-size: clamp(42px, 8vw, 72px); letter-spacing: -0.06em; }
+h1 span { color: var(--accent); }
+.lead { margin: 0 auto; max-width: 680px; color: var(--muted); font-size: 18px; }
+.panel {
+  background: rgba(17,23,34,.92); border: 1px solid var(--line); border-radius: 22px;
+  padding: 22px; box-shadow: 0 24px 70px rgba(0,0,0,.25);
+}
+.grid { display: grid; grid-template-columns: 2fr 1.2fr 1.2fr .8fr; gap: 14px; }
+label span { display: block; color: #b7c2d4; font-size: 13px; margin-bottom: 7px; }
+input, select {
+  width: 100%; padding: 13px 14px; border-radius: 11px; border: 1px solid #32405a;
+  color: var(--text); background: #0d131d; outline: none; font: inherit;
+}
+input:focus, select:focus { border-color: var(--accent); }
+button {
+  width: 100%; margin-top: 16px; border: 0; border-radius: 12px; padding: 14px 18px;
+  background: linear-gradient(135deg, #7394ff, #9878ff); color: white;
+  font-weight: 800; font-size: 16px; cursor: pointer;
+}
+button:hover { filter: brightness(1.07); }
+.hint { margin: 10px 0 0; text-align: center; color: #7f8ba0; font-size: 12px; }
+.error {
+  margin-top: 18px; border: 1px solid #6b2e3c; background: #2b1219;
+  color: #ffc5cf; padding: 14px 16px; border-radius: 12px;
+}
+.results-head {
+  display: flex; justify-content: space-between; gap: 16px; align-items: end;
+  padding: 34px 2px 14px;
+}
+.results-head h2 { margin: 0 0 4px; }
+.results-head p { margin: 0; color: var(--muted); }
+.service-pill {
+  border: 1px solid #34425c; border-radius: 99px; padding: 8px 12px; color: #c8d3e7;
+}
+.cards { display: grid; gap: 14px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid #45536a;
+  border-radius: 18px; padding: 20px;
+}
+.card.strong { border-left-color: var(--green); }
+.card.medium { border-left-color: var(--amber); }
+.card-top { display: flex; justify-content: space-between; gap: 20px; }
+.card h3 { margin: 0 0 5px; font-size: 22px; }
+.card a { color: #8eb0ff; word-break: break-all; text-decoration: none; }
+.score { text-align: right; min-width: 75px; }
+.score b { display: block; font-size: 29px; }
+.score small { color: var(--muted); }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.meta span {
+  padding: 5px 8px; border-radius: 8px; background: #0d131d; color: #aebbd0; font-size: 12px;
+}
+.block { padding-top: 10px; }
+.block strong, summary { color: #dbe5f4; }
+.block p { margin: 5px 0 0; color: #b8c4d6; }
+ul { margin: 8px 0 0 18px; color: #aebbd0; }
+details { margin-top: 12px; border-top: 1px solid #263143; padding-top: 12px; }
+summary { cursor: pointer; font-weight: 700; }
+.evidence { line-height: 1.55; }
+footer { text-align: center; color: #66748b; padding: 36px 0 50px; font-size: 12px; }
+@media (max-width: 820px) {
+  .grid { grid-template-columns: 1fr; }
+  .results-head { align-items: start; flex-direction: column; }
+  .card-top { flex-direction: column; }
+  .score { text-align: left; }
+}
+
+.focused input[disabled] { opacity: .78; cursor: not-allowed; }
+
+.action-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  background: rgba(255,255,255,.035);
+}
+.action-title { font-weight: 800; margin-bottom: 10px; }
+.outreach-subject { margin-top: 10px; }
+.outreach-label { margin-top: 12px; font-weight: 700; }
+.outreach-message {
+  white-space: pre-wrap;
+  font-family: inherit;
+  line-height: 1.55;
+  margin: 8px 0 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(0,0,0,.18);
+  overflow-wrap: anywhere;
+}
