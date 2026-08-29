@@ -17,7 +17,7 @@
 <body>
   <nav class="nav wrap">
     <a class="brand" href="/" aria-label="NeedBeacon home">Need<span>Beacon</span></a>
-    <a class="nav-link" href="#scanner">Try the MVP</a>
+    <a class="nav-link" href="#early-access">Get Early Access</a>
   </nav>
 
   <main>
@@ -26,10 +26,10 @@
       <h1>Find restaurants that <span>actually show signs</span> they need website help.</h1>
       <p class="lead">NeedBeacon scans real businesses, checks their public websites for concrete problems, ranks the strongest opportunities, and prepares a personalized outreach message.</p>
       <div class="hero-actions">
-        <a class="primary-cta" href="#scanner">Find Opportunities</a>
+        <a class="primary-cta" href="#early-access">Get Early Access</a>
         <a class="secondary-cta" href="#how-it-works">See how it works</a>
       </div>
-      <p class="scope-note">Current MVP focus: <strong>Website Design → Restaurants</strong></p>
+      <p class="scope-note">Private beta focus: <strong>Website Design → Restaurants</strong></p>
     </section>
 
     <section class="trust-strip wrap" aria-label="NeedBeacon workflow summary">
@@ -99,142 +99,56 @@
       </div>
     </section>
 
-    <section id="scanner" class="scanner-section wrap">
+    <section id="early-access" class="scanner-section wrap">
       <div class="section-heading centered">
-        <div class="eyebrow">Try NeedBeacon</div>
-        <h2>Find website-design opportunities in a city.</h2>
-        <p>This validation build currently searches restaurants only. A scan can take a couple of minutes.</p>
+        <div class="eyebrow">Private beta</div>
+        <h2>Want NeedBeacon when early access opens?</h2>
+        <p>Join the early-access list. We are validating the first version with web designers, freelancers and small agencies before opening live scanning publicly.</p>
       </div>
 
       <section class="panel">
-        <form method="post">
+        {% if joined %}
+          <div class="success-box">
+            <strong>You’re on the list.</strong>
+            <p>Thanks — your early-access request was recorded.</p>
+          </div>
+        {% else %}
+        <form method="post" action="/join">
           <div class="grid focused">
             <label>
-              <span>Service</span>
-              <input value="Website design" disabled>
+              <span>Email</span>
+              <input type="email" name="email" placeholder="you@example.com" required maxlength="160">
             </label>
-
             <label>
-              <span>Target business</span>
-              <input value="Restaurants" disabled>
+              <span>What do you sell?</span>
+              <input name="service" placeholder="e.g. Website design" maxlength="120">
             </label>
-
             <label>
-              <span>City</span>
-              <input name="city" value="{{ city }}" placeholder="e.g. Milano" required>
+              <span>Your role</span>
+              <select name="role">
+                <option>Freelancer</option>
+                <option>Agency</option>
+                <option>Web designer</option>
+                <option>Sales / lead generation</option>
+                <option>Other</option>
+              </select>
             </label>
-
             <label>
-              <span>Best opportunities</span>
-              <select name="show_count">
-                {% for n in [5, 10, 20] %}
-                <option value="{{ n }}" {% if show_count == n %}selected{% endif %}>{{ n }}</option>
-                {% endfor %}
+              <span>Would you pay if useful?</span>
+              <select name="willingness">
+                <option value="maybe">Maybe — I want to test it first</option>
+                <option value="yes-29">Yes — around €20–30/month</option>
+                <option value="yes-49">Yes — around €40–50/month</option>
+                <option value="no">No — free only</option>
               </select>
             </label>
           </div>
-
-          <button type="submit">Find Opportunities</button>
-          <p class="hint">NeedBeacon analyzes a wider pool and returns the strongest website-design opportunities first.</p>
+          <button type="submit">Request Early Access</button>
+          <p class="hint">No payment required. This is an early product-validation list.</p>
         </form>
+        {% endif %}
       </section>
     </section>
-
-    {% if error %}
-      <div class="error wrap">{{ error }}</div>
-    {% endif %}
-
-    {% if results is not none %}
-      <section class="results-wrap wrap">
-        <div class="results-head">
-          <div>
-            <div class="eyebrow">Live scan</div>
-            <h2>Opportunity results</h2>
-            <p>{{ analyzed_count }} businesses analyzed from a pool of {{ pool_count }}{% if elapsed is not none %} in {{ elapsed }}s{% endif %}.</p>
-          </div>
-          <div class="service-pill">Website design → Restaurants</div>
-        </div>
-
-        <section class="cards">
-          {% for r in results %}
-            {% set score = r.opportunity_score %}
-            <article class="card {% if score is not none and score >= 70 %}strong{% elif score is not none and score >= 25 %}medium{% else %}low{% endif %}">
-              <div class="card-top">
-                <div>
-                  <h3>{{ r.business_name }}</h3>
-                  <a href="{{ r.website }}" target="_blank" rel="noopener">{{ r.website }}</a>
-                </div>
-
-                <div class="score">
-                  {% if score is none %}
-                    <b>N/A</b><small>{{ r.status }}</small>
-                  {% else %}
-                    <b>{{ score }}</b><small>/100</small>
-                  {% endif %}
-                </div>
-              </div>
-
-              <div class="meta">
-                <span>{{ r.confidence }} confidence</span>
-                <span>{{ r.pages_checked }} pages checked</span>
-                <span>{{ r.status }}</span>
-              </div>
-
-              {% if r.primary_problem %}
-                <div class="block">
-                  <strong>Problem</strong>
-                  <p>{{ r.primary_problem }}</p>
-                </div>
-              {% endif %}
-
-              {% if r.recommended_action %}
-                <div class="block">
-                  <strong>Recommended action</strong>
-                  <p>{{ r.recommended_action }}</p>
-                </div>
-              {% endif %}
-
-              {% if r.signals %}
-                <div class="block">
-                  <strong>Signals</strong>
-                  <ul>
-                    {% for s in r.signals %}
-                      <li>{{ s }}</li>
-                    {% endfor %}
-                  </ul>
-                </div>
-              {% endif %}
-
-              {% if r.outreach %}
-                <div class="action-panel">
-                  <div class="action-title">Ready-to-use lead</div>
-                  {% if r.outreach.email %}
-                    <div><strong>Email:</strong> {{ r.outreach.email }}</div>
-                  {% endif %}
-                  {% if r.outreach.phone %}
-                    <div><strong>Phone:</strong> {{ r.outreach.phone }}</div>
-                  {% endif %}
-                  <div class="outreach-subject"><strong>Subject:</strong> {{ r.outreach.subject }}</div>
-                  <div class="outreach-label">Personalized outreach</div>
-                  <pre class="outreach-message">{{ r.outreach.message }}</pre>
-                </div>
-              {% endif %}
-
-              {% if r.evidence %}
-                <details>
-                  <summary>Evidence</summary>
-                  <ul class="evidence">
-                    {% for e in r.evidence[:6] %}
-                      <li>{{ e }}</li>
-                    {% endfor %}
-                  </ul>
-                </details>
-              {% endif %}
-            </article>
-          {% endfor %}
-        </section>
-      </section>
-    {% endif %}
 
     <section class="closing wrap">
       <div>
@@ -242,13 +156,13 @@
         <h2>Spend less time hunting through random businesses.</h2>
         <p>Start with businesses where there is already a visible reason to begin the conversation.</p>
       </div>
-      <a class="primary-cta" href="#scanner">Try NeedBeacon</a>
+      <a class="primary-cta" href="#early-access">Get Early Access</a>
     </section>
   </main>
 
   <footer class="footer wrap">
     <div class="brand small">Need<span>Beacon</span></div>
-    <p>Validation MVP · Website Design → Restaurants</p>
+    <p>Private beta · Website Design → Restaurants</p>
   </footer>
 </body>
 </html>

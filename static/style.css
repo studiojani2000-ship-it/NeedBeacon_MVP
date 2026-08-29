@@ -223,3 +223,9 @@ summary { cursor: pointer; font-weight: 700; }
   .score { text-align: left; }
   .closing { padding: 24px; }
 }
+.success-box { text-align:center; padding:26px; border:1px solid rgba(52,211,153,.28); background:rgba(52,211,153,.07); border-radius:16px; }
+.success-box strong { display:block; font-size:22px; color:#9cf0cb; }
+.success-box p { margin:8px 0 0; color:#b9c7d9; }
+.admin-wrap { max-width:1100px; margin:40px auto; padding:0 20px; color:#e7edf7; font-family:system-ui,sans-serif; }
+.admin-wrap table { width:100%; border-collapse:collapse; background:#101722; }
+.admin-wrap th,.admin-wrap td { padding:10px; border:1px solid #29354a; text-align:left; font-size:13px; }

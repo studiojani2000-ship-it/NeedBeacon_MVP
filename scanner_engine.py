@@ -2,6 +2,9 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 import glob
 import time
 from datetime import datetime
@@ -18,6 +21,8 @@ OVERPASS_ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.nchc.org.tw/api/interpreter",
 ]
+
+BUILD_TAG = "CONTACT_PIPELINE_V4"
 
 GEOAPIFY_PLACES_URL = "https://api.geoapify.com/v2/places"
 GEOAPIFY_GEOCODE_URL = "https://api.geoapify.com/v1/geocode/search"
@@ -66,8 +71,12 @@ PARKING_HOSTS = [
 
 SUSPICIOUS_TERMS = [
     "casino", "betting", "scommesse", "slot machine",
-    "crypto casino", "porn", "viagra"
+    "crypto casino", "viagra"
 ]
+
+# Very short/generic terms such as "porn" can occur inside scripts, URLs or
+# third-party assets and caused false positives. Suspicious checks below are
+# intentionally limited to visible page text and phrase/word boundaries.
 
 
 def valid_url(url):
@@ -121,6 +130,51 @@ TECHNICAL_EMAIL_PARTS = (
     "noreply@", "no-reply@", "donotreply@", "do-not-reply@"
 )
 
+DISPOSABLE_OR_GARBLED_TLDS = {
+    "oq", "invalid", "local", "test", "example"
+}
+
+
+COMMON_BUSINESS_TLDS = {
+    "it", "com", "net", "org", "eu", "info", "biz", "co", "io",
+    "restaurant", "pizza", "food", "cafe", "bar"
+}
+
+
+def _email_domain_matches_website(email, website):
+    """For discovered-provider emails, require the email domain to plausibly match the business site."""
+    try:
+        email_domain = email.split("@", 1)[1].lower().strip(".")
+        web_domain = _host(website)
+        if web_domain.startswith("www."):
+            web_domain = web_domain[4:]
+        return bool(web_domain and (email_domain == web_domain or email_domain.endswith("." + web_domain)))
+    except Exception:
+        return False
+
+
+def _plausible_business_email(email):
+    """Conservative final gate: prefer no email over a fabricated-looking contact."""
+    if not email or "@" not in email:
+        return False
+    local, domain = email.lower().split("@", 1)
+    if "." not in domain:
+        return False
+    tld = domain.rsplit(".", 1)[-1]
+    # Restaurant leads in this MVP are Italy-focused; uncommon random TLDs are a strong junk signal.
+    if tld not in COMMON_BUSINESS_TLDS:
+        return False
+    head = domain.rsplit(".", 1)[0].split(".")[-1]
+    if len(head) < 3:
+        return False
+    # Reject random-looking mailbox/domain labels with digits unless they resemble normal named addresses.
+    if re.search(r"\d", head) and len(head) <= 8:
+        return False
+    if len(local) <= 5 and not any(word in local for word in ("info", "hello", "ciao", "mail", "admin", "booking", "prenota", "contact")):
+        # short random local-parts such as phjl@... are not safe enough to surface
+        return False
+    return True
+
 
 def clean_emails(emails):
     out = []
@@ -130,8 +184,27 @@ def clean_emails(emails):
             continue
         if any(part in email for part in TECHNICAL_EMAIL_PARTS):
             continue
-        domain = email.split("@", 1)[1]
+        local, domain = email.split("@", 1)
         if any(domain == bad or domain.endswith("." + bad) for bad in TECHNICAL_EMAIL_DOMAINS):
+            continue
+        # Reject obvious obfuscated/garbled addresses extracted from scripts.
+        tld = domain.rsplit(".", 1)[-1].lower() if "." in domain else ""
+        if tld in DISPOSABLE_OR_GARBLED_TLDS:
+            continue
+        if local.startswith("+") or len(local) < 2 or len(domain) < 4:
+            continue
+        # Require a plausible human/business mailbox and domain label. This rejects
+        # script-generated junk such as f-@v9.ouc without being tied to one exact string.
+        local_alnum = re.sub(r"[^a-z0-9]", "", local.lower())
+        domain_head = domain.rsplit(".", 1)[0]
+        domain_letters = re.sub(r"[^a-z]", "", domain_head.lower())
+        if len(local_alnum) < 2 or len(domain_letters) < 2:
+            continue
+        # Extremely consonant/random local-parts are commonly generated IDs, not contacts.
+        letters = re.sub(r"[^a-z]", "", local.lower())
+        if len(letters) >= 9 and not any(v in letters for v in "aeiou"):
+            continue
+        if not _plausible_business_email(email):
             continue
         if email not in out:
             out.append(email)
@@ -174,6 +247,10 @@ def clean_phones(phones):
             continue
 
         digits = re.sub(r"\D", "", value)
+        # Italian VAT/company codes are often 11 digits and can be mistaken for phones.
+        # A bare 00-prefixed 11-digit value is not a plausible complete international phone.
+        if digits.startswith("00") and len(digits) <= 11 and not value.startswith("+"):
+            continue
 
         if len(digits) < 8 or len(digits) > 13:
             continue
@@ -566,19 +643,31 @@ def inspect_page(url, html):
     visible = soup.get_text(" ", strip=True)
     structural = get_visible_and_structural_text(soup, html)
 
-    emails = re.findall(
+    # Contact Quality V3: never harvest email-like strings from raw HTML/JS.
+    # Only accept addresses exposed to a visitor: mailto links or visible page text.
+    email_candidates = []
+    for a in soup.find_all("a", href=True):
+        href = str(a.get("href", "")).strip()
+        if href.lower().startswith("mailto:"):
+            mailbox = unquote(href[7:]).split("?", 1)[0].strip()
+            if mailbox:
+                email_candidates.append(mailbox)
+
+    email_candidates.extend(re.findall(
         r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
-        html
-    )
+        visible
+    ))
+    emails = clean_emails(email_candidates)
     phones = re.findall(r"(\+?\d[\d\s().-]{7,}\d)", visible)
 
     booking_hits = text_contains(structural, BOOKING_WORDS)
     ordering_hits = text_contains(structural, ORDERING_WORDS)
     contact_hits = text_contains(structural, CONTACT_WORDS)
     parked, parked_evidence = detect_parked_domain(url, soup, visible)
-    suspicious_hits = text_contains(structural, SUSPICIOUS_TERMS)
+    # Suspicious content must be visible to a visitor. Do not scan raw HTML,
+    # scripts, CSS or URLs for this high-impact signal.
+    suspicious_hits = text_contains(visible.lower(), SUSPICIOUS_TERMS)
 
-    emails = clean_emails(emails)
     phones = clean_phones(phones)
 
     return {
@@ -736,10 +825,13 @@ def analyze_website(business):
 
         result["pages_checked"] = len(pages)
 
-        osm_emails = clean_emails([business["email_osm"]]) if business["email_osm"] else []
-        if osm_emails:
+        # Contact Pipeline V4: Geoapify/provider email is secondary evidence only.
+        # Surface it only when it passes the conservative validator AND its domain matches
+        # the restaurant's official website domain. Website-visible/mailto email remains preferred.
+        provider_emails = clean_emails([business["email_osm"]]) if business["email_osm"] else []
+        if provider_emails and _email_domain_matches_website(provider_emails[0], business.get("website", "")):
             result["email_found"] = True
-            add_evidence(evidence, "EMAIL", osm_emails[0], "OSM")
+            add_evidence(evidence, "EMAIL", provider_emails[0], "Geoapify verified-domain")
 
         osm_phones = clean_phones([business["phone_osm"]]) if business["phone_osm"] else []
         if osm_phones:

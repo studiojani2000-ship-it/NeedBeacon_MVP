@@ -1,152 +1,73 @@
-from flask import Flask, render_template, request, redirect, url_for, Response
-from scanner_engine import find_businesses, analyze_website
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
-import re
+from flask import Flask, render_template, request, redirect, url_for, Response, abort
+import csv, os, re
+from datetime import datetime, timezone
+from pathlib import Path
 
 app = Flask(__name__)
-LAST_RESULT = None
-
-DISCOVERY_POOL = 30
-DEFAULT_SHOW = 10
-MAX_WORKERS = 3
 PUBLIC_BASE_URL = "https://needbeacon.onrender.com"
+WAITLIST_FILE = Path(os.getenv("WAITLIST_FILE", "data/waitlist.csv"))
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$")
 
 
-def build_outreach(result, city):
-    name = result.get("business_name") or result.get("name") or "your restaurant"
-    problem = result.get("problem") or "a website issue"
-    signals = result.get("signals") or []
-    evidence = result.get("evidence") or []
-
-    email = ""
-    phone = ""
-    for item in evidence:
-        text = str(item)
-        if not email and "EMAIL:" in text:
-            m = re.search(r'EMAIL:\s*([^\s@]+@[^\s@]+)', text, re.I)
-            if m:
-                email = m.group(1).rstrip(".,;")
-        if not phone and "PHONE:" in text:
-            phone = text.split("PHONE:", 1)[1].split("@", 1)[0].strip()
-
-    strongest = signals[0] if signals else problem
-    subject = f"Quick website idea for {name}"
-    message = (
-        f"Hi {name} team,\n\n"
-        f"I came across your restaurant while researching businesses in {city}. "
-        f"I noticed a specific website issue: {strongest.lower().rstrip('.')}. "
-        f"I design and improve websites for businesses, and I think this is something that could be fixed "
-        f"to make it easier for customers to find and contact you.\n\n"
-        f"If useful, I can send you a short no-obligation suggestion for what I would change.\n\n"
-        f"Best regards"
-    )
-    return {
-        "email": email,
-        "phone": phone,
-        "subject": subject,
-        "message": message,
-    }
+def _ensure_store():
+    WAITLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not WAITLIST_FILE.exists():
+        with WAITLIST_FILE.open("w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(["created_utc", "email", "service", "role", "willingness"])
 
 
-def sort_results(results):
-    def key(item):
-        score = item.get("opportunity_score")
-        return -1 if score is None else score
-    return sorted(results, key=key, reverse=True)
+def _already_joined(email):
+    _ensure_store()
+    with WAITLIST_FILE.open("r", newline="", encoding="utf-8") as f:
+        return any((row.get("email") or "").lower() == email.lower() for row in csv.DictReader(f))
 
 
-def analyze_many(businesses):
-    results = []
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(analyze_website, b): b for b in businesses}
-        for future in as_completed(futures):
-            try:
-                results.append(future.result())
-            except Exception:
-                pass
-    return results
-
-
-@app.route("/", methods=["GET", "POST"])
+@app.get("/")
 def index():
-    global LAST_RESULT
-
-    context = {
-        "results": None,
-        "error": None,
-        "city": "Milano",
-        "show_count": DEFAULT_SHOW,
-        "elapsed": None,
-        "analyzed_count": 0,
-        "pool_count": 0,
-    }
-
-    if request.method == "GET":
-        if LAST_RESULT:
-            context.update(LAST_RESULT)
-        return render_template("index.html", **context)
-
-    city = request.form.get("city", "").strip()
-    try:
-        show_count = int(request.form.get("show_count", str(DEFAULT_SHOW)))
-    except ValueError:
-        show_count = DEFAULT_SHOW
-
-    show_count = max(5, min(show_count, 20))
-    context.update(city=city, show_count=show_count)
-
-    if not city:
-        context["error"] = "Write a city."
-        LAST_RESULT = context
-        return redirect(url_for("index"))
-
-    started = time.time()
-
-    try:
-        businesses = find_businesses(city, "restaurant", DISCOVERY_POOL)
-    except Exception as exc:
-        context["error"] = f"Business discovery failed: {exc}"
-        LAST_RESULT = context
-        return redirect(url_for("index"))
-
-    context["pool_count"] = len(businesses)
-
-    results = analyze_many(businesses)
-    ranked = sort_results(results)
-
-    for result in ranked:
-        score = result.get("opportunity_score")
-        confidence = str(result.get("confidence") or "").upper()
-        if score is not None and score >= 20 and confidence in {"MEDIUM", "HIGH"}:
-            result["outreach"] = build_outreach(result, city)
-        else:
-            result["outreach"] = None
-
-    context["results"] = ranked[:show_count]
-    context["analyzed_count"] = len(results)
-    context["elapsed"] = round(time.time() - started, 1)
-
-    LAST_RESULT = context
-    return redirect(url_for("index"))
+    return render_template("index.html", joined=request.args.get("joined") == "1")
 
 
-@app.route("/robots.txt")
+@app.post("/join")
+def join():
+    email = request.form.get("email", "").strip().lower()[:160]
+    service = request.form.get("service", "").strip()[:120]
+    role = request.form.get("role", "").strip()[:80]
+    willingness = request.form.get("willingness", "").strip()[:80]
+    if not EMAIL_RE.match(email):
+        return redirect(url_for("index") + "#early-access")
+    _ensure_store()
+    if not _already_joined(email):
+        with WAITLIST_FILE.open("a", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(), email, service, role, willingness])
+    return redirect(url_for("index", joined=1) + "#early-access")
+
+
+@app.get("/admin/waitlist")
+def admin_waitlist():
+    secret = os.getenv("WAITLIST_ADMIN_KEY", "")
+    if not secret or request.args.get("key") != secret:
+        abort(404)
+    _ensure_store()
+    with WAITLIST_FILE.open("r", newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    html = ["<!doctype html><meta name='robots' content='noindex'><link rel='stylesheet' href='/static/style.css'><div class='admin-wrap'>",
+            f"<h1>NeedBeacon early-access requests: {len(rows)}</h1>",
+            "<table><tr><th>Date UTC</th><th>Email</th><th>Service</th><th>Role</th><th>Payment signal</th></tr>"]
+    import html as h
+    for r in reversed(rows):
+        html.append("<tr>" + "".join(f"<td>{h.escape(r.get(k,'') or '')}</td>" for k in ["created_utc","email","service","role","willingness"]) + "</tr>")
+    html.append("</table><p style='color:#94a3b8'>Note: Render Free storage is ephemeral; export/record meaningful signups before redeploys or restarts.</p></div>")
+    return "".join(html)
+
+
+@app.get("/robots.txt")
 def robots():
-    body = f"User-agent: *\nAllow: /\nSitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
-    return Response(body, mimetype="text/plain")
+    return Response(f"User-agent: *\nAllow: /\nDisallow: /admin/\nSitemap: {PUBLIC_BASE_URL}/sitemap.xml\n", mimetype="text/plain")
 
 
-@app.route("/sitemap.xml")
+@app.get("/sitemap.xml")
 def sitemap():
-    body = f'''<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>{PUBLIC_BASE_URL}/</loc>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
-  </url>
-</urlset>'''
+    body = f'''<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{PUBLIC_BASE_URL}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url></urlset>'''
     return Response(body, mimetype="application/xml")
 
 
