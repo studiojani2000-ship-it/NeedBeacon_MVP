@@ -19,6 +19,10 @@ OVERPASS_ENDPOINTS = [
     "https://overpass.nchc.org.tw/api/interpreter",
 ]
 
+GEOAPIFY_PLACES_URL = "https://api.geoapify.com/v2/places"
+GEOAPIFY_GEOCODE_URL = "https://api.geoapify.com/v1/geocode/search"
+GEOAPIFY_DETAILS_URL = "https://api.geoapify.com/v2/place-details"
+
 MAX_INTERNAL_PAGES = 8
 
 BOOKING_WORDS = [
@@ -276,6 +280,7 @@ def load_cached_businesses(limit=50):
 
     for f in files:
         try:
+            import pandas as pd
             df = pd.read_csv(f)
             if "business_name" not in df.columns or "website" not in df.columns:
                 continue
@@ -309,54 +314,158 @@ def load_cached_businesses(limit=50):
     return out
 
 
-def find_businesses(city, business_type, limit=20):
-    south, west, north, east = geocode_city(city, "it")
-    amenity = "restaurant"
+def _geoapify_api_key():
+    key = os.getenv("GEOAPIFY_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError(
+            "GEOAPIFY_API_KEY mungon. Shtoje te Render -> Environment Variables."
+        )
+    return key
 
-    query = f"""
-    [out:json][timeout:90];
-    (
-      nwr["amenity"="{amenity}"]["website"]({south},{west},{north},{east});
-      nwr["amenity"="{amenity}"]["contact:website"]({south},{west},{north},{east});
-    );
-    out tags center;
-    """
 
+def _geoapify_city_center(city):
+    api_key = _geoapify_api_key()
+    print(f"Po gjej qytetin me Geoapify: {city}")
+
+    r = requests.get(
+        GEOAPIFY_GEOCODE_URL,
+        params={
+            "text": f"{city}, Italy",
+            "type": "city",
+            "filter": "countrycode:it",
+            "limit": 1,
+            "format": "json",
+            "apiKey": api_key,
+        },
+        headers=HEADERS,
+        timeout=20,
+    )
+    r.raise_for_status()
+    data = r.json()
+
+    results = data.get("results", []) if isinstance(data, dict) else []
+    if not results:
+        raise RuntimeError(f"Geoapify nuk e gjeti qytetin '{city}'.")
+
+    item = results[0]
+    lat = item.get("lat")
+    lon = item.get("lon")
+    if lat is None or lon is None:
+        raise RuntimeError("Geoapify e gjeti qytetin, por pa koordinata.")
+
+    print(f"U gjet sakte: {item.get('formatted') or item.get('city') or city}")
+    return float(lat), float(lon)
+
+
+def _geoapify_place_details(place_id, api_key):
     try:
-        data = overpass_request(query)
-    except Exception as e:
-        print("\nOverpass perkohesisht deshtoi:")
-        print(str(e))
-        cached = load_cached_businesses(limit)
-        if cached:
-            return cached
-        raise
+        r = requests.get(
+            GEOAPIFY_DETAILS_URL,
+            params={"id": place_id, "features": "details", "apiKey": api_key},
+            headers=HEADERS,
+            timeout=20,
+        )
+        if r.status_code != 200:
+            return {}
+
+        data = r.json()
+        for feature in data.get("features", []):
+            props = feature.get("properties", {}) or {}
+            if props.get("feature_type") == "details" or props.get("website") or props.get("contact"):
+                return props
+    except Exception:
+        pass
+    return {}
+
+
+def find_businesses(city, business_type, limit=20):
+    """
+    Primary discovery for the hosted MVP:
+    Geoapify city geocoding -> Geoapify Places -> Place Details.
+
+    Overpass is intentionally NOT used here because public Overpass endpoints
+    proved unreliable from Render. We only keep the old Overpass helpers in
+    this file for local/debug use.
+    """
+    api_key = _geoapify_api_key()
+    lat, lon = _geoapify_city_center(city)
+
+    # Fetch more candidates than needed because not every restaurant has a
+    # public website in the underlying OSM-derived data.
+    candidate_limit = min(100, max(40, int(limit) * 2))
+
+    print(f"Po kerkoj restorante me Geoapify: {city} (deri {candidate_limit} kandidate)")
+    r = requests.get(
+        GEOAPIFY_PLACES_URL,
+        params={
+            "categories": "catering.restaurant",
+            "filter": f"circle:{lon},{lat},18000",
+            "bias": f"proximity:{lon},{lat}",
+            "limit": candidate_limit,
+            "lang": "en",
+            "apiKey": api_key,
+        },
+        headers=HEADERS,
+        timeout=30,
+    )
+    r.raise_for_status()
+    data = r.json()
 
     out, seen = [], set()
+    features = data.get("features", []) if isinstance(data, dict) else []
 
-    for element in data.get("elements", []):
-        tags = element.get("tags", {})
-        website = normalize_url(tags.get("website") or tags.get("contact:website"))
+    for feature in features:
+        props = feature.get("properties", {}) or {}
+        place_id = props.get("place_id")
+        if not place_id:
+            continue
+
+        # Some responses can already contain useful fields. If not, Details
+        # API supplies official website/contact data when available.
+        details = props if props.get("website") else _geoapify_place_details(place_id, api_key)
+
+        website = normalize_url(
+            details.get("website")
+            or props.get("website")
+            or ""
+        )
         if not website:
             continue
+
         key = website.lower().rstrip("/")
         if key in seen:
             continue
         seen.add(key)
 
+        contact = details.get("contact") or {}
+        if not isinstance(contact, dict):
+            contact = {}
+
+        name = (
+            details.get("name")
+            or props.get("name")
+            or props.get("address_line1")
+            or "Unknown"
+        )
+
         out.append({
-            "name": tags.get("name", "Unknown"),
+            "name": str(name).strip() or "Unknown",
             "website": website,
-            "phone_osm": tags.get("phone") or tags.get("contact:phone") or "",
-            "email_osm": tags.get("email") or tags.get("contact:email") or "",
-            "instagram_osm": tags.get("contact:instagram") or tags.get("instagram") or "",
+            "phone_osm": contact.get("phone") or props.get("phone") or "",
+            "email_osm": contact.get("email") or props.get("email") or "",
+            "instagram_osm": "",
         })
 
-        if len(out) >= limit:
+        print(f"  + {out[-1]['name']} -> {website}")
+
+        if len(out) >= int(limit):
             break
 
-    return out
+        # Stay comfortably below free-tier burst limits.
+        time.sleep(0.12)
 
+    print(f"Geoapify dha {len(out)} restorante me website per analizim.")
+    return out
 
 def text_contains(text, words):
     low = text.lower()
