@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, Response
 from scanner_engine import find_businesses, analyze_website
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
@@ -10,6 +10,8 @@ LAST_RESULT = None
 DISCOVERY_POOL = 50
 DEFAULT_SHOW = 10
 MAX_WORKERS = 6
+PUBLIC_BASE_URL = "https://needbeacon.onrender.com"
+
 
 def build_outreach(result, city):
     name = result.get("business_name") or result.get("name") or "your restaurant"
@@ -53,6 +55,7 @@ def sort_results(results):
         return -1 if score is None else score
     return sorted(results, key=key, reverse=True)
 
+
 def analyze_many(businesses):
     results = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -63,6 +66,7 @@ def analyze_many(businesses):
             except Exception:
                 pass
     return results
+
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -125,6 +129,26 @@ def index():
 
     LAST_RESULT = context
     return redirect(url_for("index"))
+
+
+@app.route("/robots.txt")
+def robots():
+    body = f"User-agent: *\nAllow: /\nSitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+    return Response(body, mimetype="text/plain")
+
+
+@app.route("/sitemap.xml")
+def sitemap():
+    body = f'''<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>{PUBLIC_BASE_URL}/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>'''
+    return Response(body, mimetype="application/xml")
+
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=False)
