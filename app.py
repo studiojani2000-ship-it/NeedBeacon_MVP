@@ -1,25 +1,75 @@
 from flask import Flask, render_template, request, redirect, url_for, Response, abort
-import csv, os, re
+import os, re, html as h
 from datetime import datetime, timezone
-from pathlib import Path
+import requests
 
 app = Flask(__name__)
 PUBLIC_BASE_URL = "https://needbeacon.onrender.com"
-WAITLIST_FILE = Path(os.getenv("WAITLIST_FILE", "data/waitlist.csv"))
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$")
 
 
-def _ensure_store():
-    WAITLIST_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if not WAITLIST_FILE.exists():
-        with WAITLIST_FILE.open("w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(["created_utc", "email", "service", "role", "willingness"])
+def _supabase_config():
+    url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+    key = os.getenv("SUPABASE_SECRET_KEY", "").strip()
+    if not url or not key:
+        raise RuntimeError("SUPABASE_URL or SUPABASE_SECRET_KEY is missing")
+    return url, key
+
+
+def _headers(prefer=None):
+    _, key = _supabase_config()
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def _waitlist_endpoint():
+    url, _ = _supabase_config()
+    return f"{url}/rest/v1/waitlist"
 
 
 def _already_joined(email):
-    _ensure_store()
-    with WAITLIST_FILE.open("r", newline="", encoding="utf-8") as f:
-        return any((row.get("email") or "").lower() == email.lower() for row in csv.DictReader(f))
+    r = requests.get(
+        _waitlist_endpoint(),
+        headers=_headers(),
+        params={"select": "id", "email": f"eq.{email}", "limit": "1"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return bool(r.json())
+
+
+def _insert_waitlist(email, service, role, willingness):
+    payload = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "email": email,
+        "service": service,
+        "role": role,
+        "payment_signal": willingness,
+    }
+    r = requests.post(
+        _waitlist_endpoint(),
+        headers=_headers("return=minimal"),
+        json=payload,
+        timeout=15,
+    )
+    r.raise_for_status()
+
+
+def _get_waitlist():
+    r = requests.get(
+        _waitlist_endpoint(),
+        headers=_headers(),
+        params={"select": "created_at,email,service,role,payment_signal", "order": "created_at.desc"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()
 
 
 @app.get("/")
@@ -35,10 +85,12 @@ def join():
     willingness = request.form.get("willingness", "").strip()[:80]
     if not EMAIL_RE.match(email):
         return redirect(url_for("index") + "#early-access")
-    _ensure_store()
-    if not _already_joined(email):
-        with WAITLIST_FILE.open("a", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow([datetime.now(timezone.utc).isoformat(), email, service, role, willingness])
+    try:
+        if not _already_joined(email):
+            _insert_waitlist(email, service, role, willingness)
+    except requests.RequestException:
+        app.logger.exception("Supabase waitlist write failed")
+        return Response("Early-access signup is temporarily unavailable. Please try again shortly.", status=503)
     return redirect(url_for("index", joined=1) + "#early-access")
 
 
@@ -47,17 +99,20 @@ def admin_waitlist():
     secret = os.getenv("WAITLIST_ADMIN_KEY", "")
     if not secret or request.args.get("key") != secret:
         abort(404)
-    _ensure_store()
-    with WAITLIST_FILE.open("r", newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    html = ["<!doctype html><meta name='robots' content='noindex'><link rel='stylesheet' href='/static/style.css'><div class='admin-wrap'>",
-            f"<h1>NeedBeacon early-access requests: {len(rows)}</h1>",
-            "<table><tr><th>Date UTC</th><th>Email</th><th>Service</th><th>Role</th><th>Payment signal</th></tr>"]
-    import html as h
-    for r in reversed(rows):
-        html.append("<tr>" + "".join(f"<td>{h.escape(r.get(k,'') or '')}</td>" for k in ["created_utc","email","service","role","willingness"]) + "</tr>")
-    html.append("</table><p style='color:#94a3b8'>Note: Render Free storage is ephemeral; export/record meaningful signups before redeploys or restarts.</p></div>")
-    return "".join(html)
+    try:
+        rows = _get_waitlist()
+    except requests.RequestException:
+        app.logger.exception("Supabase waitlist read failed")
+        return Response("Could not load waitlist from Supabase.", status=503)
+
+    out = ["<!doctype html><meta name='robots' content='noindex'><link rel='stylesheet' href='/static/style.css'><div class='admin-wrap'>",
+           f"<h1>NeedBeacon early-access requests: {len(rows)}</h1>",
+           "<table><tr><th>Date UTC</th><th>Email</th><th>Service</th><th>Role</th><th>Payment signal</th></tr>"]
+    for r in rows:
+        vals = [r.get("created_at", ""), r.get("email", ""), r.get("service", ""), r.get("role", ""), r.get("payment_signal", "")]
+        out.append("<tr>" + "".join(f"<td>{h.escape(str(v or ''))}</td>" for v in vals) + "</tr>")
+    out.append("</table><p style='color:#94a3b8'>Stored persistently in Supabase.</p></div>")
+    return "".join(out)
 
 
 @app.get("/robots.txt")
